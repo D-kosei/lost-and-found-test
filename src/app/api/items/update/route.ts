@@ -2,13 +2,15 @@
 import { NextResponse } from "next/server"
 import { createSupabaseServerClient } from "@/lib/supabaseServer"
 
+export const runtime = "nodejs"
+export const dynamic = "force-dynamic"
+
 const ALLOWED = new Set(["stored", "claim_pending", "returned", "discarded"] as const)
 
 export async function POST(req: Request) {
   try {
     const supabase = createSupabaseServerClient()
 
-    // 職員ログイン必須
     const { data: { user }, error: userErr } = await supabase.auth.getUser()
     if (userErr || !user) {
       return NextResponse.json({ error: "unauthorized" }, { status: 401 })
@@ -17,7 +19,6 @@ export async function POST(req: Request) {
     const body = await req.json()
     const id = String(body?.id ?? "").trim()
     const status = String(body?.status ?? "").trim()
-    const makePrivate = Boolean(body?.makePrivate)
     const setReturnedAt = Boolean(body?.setReturnedAt)
 
     if (!id || !status) {
@@ -27,16 +28,13 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "status が不正です" }, { status: 422 })
     }
 
-    // ここで「存在するカラムのみ」更新するパッチを作る
+    // 状態と公開を常にリンク
     const patch: Record<string, any> = {
       status,
+      is_public: status === "stored",
       updated_at: new Date().toISOString(),
-      is_public: status === "stored" ? true : false,
     }
-    if (makePrivate && status === "returned") {
-      patch.is_public = false
-    }
-    // returned_atがDBに無い環境では追加しない（あるなら有効化）
+    // returned_at 列がある場合のみ使う
     // if (setReturnedAt && status === "returned") {
     //   patch.returned_at = new Date().toISOString()
     // }
@@ -51,9 +49,9 @@ export async function POST(req: Request) {
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 400 })
     }
-     // 確定した最新レコードを返す
     return NextResponse.json({ ok: true, data })
   } catch (e: any) {
+    console.error("[/api/items/update] error:", e)
     return NextResponse.json({ error: e?.message ?? "bad request" }, { status: 400 })
   }
 }
